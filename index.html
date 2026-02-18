@@ -3,21 +3,167 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>¡Feliz Cumpleaños Papá!</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Feliz Cumpleaños Papá</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial', sans-serif; }
+        #ui {
+            position: absolute; top: 20px; width: 100%; text-align: center;
+            color: white; z-index: 10; pointer-events: none;
+            text-shadow: 0 0 15px #00d2ff;
+        }
+        canvas { display: block; }
+        #debug { position: fixed; bottom: 10px; left: 10px; color: #444; font-size: 10px; }
+    </style>
 </head>
 <body>
     <div id="ui">
-        <h1>¡Feliz Cumpleaños Papá!</h1>
-        <p>Mueve tus manos frente a la cámara para jugar con las estrellas</p>
+        <h1 id="msg">¡FELIZ CUMPLE PAPÁ!</h1>
+        <p id="hint">Cargando cámara...</p>
     </div>
-    
+    <div id="debug">Iniciando sistema...</div>
     <video class="input_video" style="display:none;"></video>
-    <canvas class="output_canvas"></canvas>
 
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="script.js"></script>
+
+    <script>
+        const videoElement = document.getElementsByClassName('input_video')[0];
+        const hint = document.getElementById('hint');
+        const debug = document.getElementById('debug');
+        
+        let scene, camera, renderer, starGeo;
+        let particles = [];
+        let currentMode = 'idle'; 
+        const COUNT = 4000;
+
+        let heartPoints = [];
+        let papaPoints = [];
+
+        function createShapePoints() {
+            // CORAZÓN
+            for (let i = 0; i < COUNT; i++) {
+                let t = Math.random() * Math.PI * 2;
+                let x = 16 * Math.pow(Math.sin(t), 3);
+                let y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+                heartPoints.push(new THREE.Vector3(x * 5, y * 5, 0));
+            }
+
+            // PAPÁ (Simplificado con líneas)
+            for (let i = 0; i < COUNT; i++) {
+                let segment = Math.floor(Math.random() * 4);
+                let x = 0, y = (Math.random() - 0.5) * 100;
+                // Distribución básica de letras en columnas
+                if(segment === 0) x = -120; // P
+                if(segment === 1) x = -40;  // A
+                if(segment === 2) x = 40;   // P
+                if(segment === 3) x = 120;  // Á
+                papaPoints.push(new THREE.Vector3(x + (Math.random()*20), y, 0));
+            }
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 1000);
+            camera.position.z = 250;
+
+            renderer = new THREE.WebGLRenderer({ antialias: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            createShapePoints();
+
+            starGeo = new THREE.BufferGeometry();
+            let posArray = new Float32Array(COUNT * 3);
+
+            for (let i = 0; i < COUNT; i++) {
+                let p = {
+                    x: (Math.random() - 0.5) * 1000,
+                    y: (Math.random() - 0.5) * 1000,
+                    z: (Math.random() - 0.5) * 1000,
+                    vx: (Math.random() - 0.5) * 0.8,
+                    vy: (Math.random() - 0.5) * 0.8
+                };
+                particles.push(p);
+                posArray[i*3] = p.x;
+                posArray[i*3+1] = p.y;
+                posArray[i*3+2] = p.z;
+            }
+
+            starGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            let mat = new THREE.PointsMaterial({ color: 0x00d2ff, size: 2, transparent: true });
+            scene.add(new THREE.Points(starGeo, mat));
+
+            initMediaPipe();
+            animate();
+        }
+
+        function animate() {
+            const positions = starGeo.attributes.position.array;
+            for (let i = 0; i < COUNT; i++) {
+                let p = particles[i];
+                let target = null;
+
+                if (currentMode === 'heart') target = heartPoints[i];
+                else if (currentMode === 'papa') target = papaPoints[i];
+
+                if (target) {
+                    p.x += (target.x - p.x) * 0.1;
+                    p.y += (target.y - p.y) * 0.1;
+                    p.z += (0 - p.z) * 0.1;
+                } else {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    if (Math.abs(p.x) > 500) p.vx *= -1;
+                    if (Math.abs(p.y) > 500) p.vy *= -1;
+                }
+
+                positions[i*3] = p.x;
+                positions[i*3+1] = p.y;
+                positions[i*3+2] = p.z;
+            }
+            starGeo.attributes.position.needsUpdate = true;
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        function initMediaPipe() {
+            const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+            hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5 });
+
+            hands.onResults((results) => {
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    const lm = results.multiHandLandmarks[0];
+                    // Detección simple: ¿Está la punta del dedo índice arriba de la base?
+                    const isFist = lm[8].y > lm[5].y; 
+                    
+                    if (isFist) {
+                        currentMode = 'heart';
+                        hint.innerText = "❤️ ¡TE AMO PAPÁ! ❤️";
+                    } else {
+                        currentMode = 'papa';
+                        hint.innerText = "✨ ¡ERES EL MEJOR! ✨";
+                    }
+                } else {
+                    currentMode = 'idle';
+                    hint.innerText = "Mueve tu mano frente a la cámara";
+                }
+            });
+
+            const cameraProc = new Camera(videoElement, {
+                onFrame: async () => { await hands.send({image: videoElement}); debug.innerText = "Cámara activa"; },
+                width: 640, height: 480
+            });
+            cameraProc.start();
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        init();
+    </script>
 </body>
 </html>
